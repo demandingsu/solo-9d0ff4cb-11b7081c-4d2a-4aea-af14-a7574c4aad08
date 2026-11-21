@@ -45,6 +45,44 @@ CREATE TABLE IF NOT EXISTS confirmations (
     created_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 );
 CREATE INDEX IF NOT EXISTS idx_confirmations_page ON confirmations(page_id);
+
+-- 编辑在校订稿上补录的人名（新稿区间）。同一页、同名、同区间只存一行。
+CREATE TABLE IF NOT EXISTS supplements (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    page_id    INTEGER NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
+    name       TEXT NOT NULL,
+    new_start  INTEGER NOT NULL,
+    new_end    INTEGER NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+    UNIQUE (page_id, name, new_start, new_end)
+);
+CREATE INDEX IF NOT EXISTS idx_supplements_page ON supplements(page_id);
+
+-- 检索库命中：一页上同名、同新区间的一组来源合并为一条命中。
+-- 编号持久化，重启后可按编号回查；后来可用的旧标注并入既有命中时沿用编号。
+CREATE TABLE IF NOT EXISTS hits (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    page_id    INTEGER NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
+    name       TEXT NOT NULL,
+    new_start  INTEGER NOT NULL,
+    new_end    INTEGER NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+    UNIQUE (page_id, name, new_start, new_end)
+);
+CREATE INDEX IF NOT EXISTS idx_hits_page ON hits(page_id);
+
+-- 命中的来源：旧标注（annotations）或编辑补录（supplements）。
+-- 每条来源最多归属一条命中。
+CREATE TABLE IF NOT EXISTS hit_sources (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    hit_id      INTEGER NOT NULL REFERENCES hits(id) ON DELETE CASCADE,
+    source_type TEXT NOT NULL CHECK (source_type IN ('annotation','supplement')),
+    source_id   INTEGER NOT NULL,
+    UNIQUE (source_type, source_id)
+);
+CREATE INDEX IF NOT EXISTS idx_hit_sources_hit ON hit_sources(hit_id);
 """
 
 

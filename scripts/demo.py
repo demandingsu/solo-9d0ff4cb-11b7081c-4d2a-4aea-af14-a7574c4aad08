@@ -36,6 +36,13 @@ SWAP_PAGE = {
         {"name": "李四", "start": 3, "end": 5},
     ],
 }
+# 校订稿新添人名（旧稿没有对应标注），用于补录演示
+SUP_PAGE = {
+    "page_ref": "卷三·頁九",
+    "old_text": "王五來訪，趙六同行。",
+    "new_text": "王五來訪，趙六同行，王五再至。",
+    "annotations": [],
+}
 
 
 def show_ann(a):
@@ -67,11 +74,13 @@ def main() -> None:
     show_page("建页结果", page)
     pending = [a for a in page["annotations"] if a["status"] == "pending"][0]
 
-    print("\n== 2. 检索库视图（只含可用标注）")
+    print("\n== 2. 检索库视图（命中 + 待核）")
     idx = http.get(f"/pages/{page['id']}/index").json()
     for it in idx["items"]:
-        print(f"    「{it['name']}」新[{it['start']},{it['end']}) "
-              f"「{it['excerpt']}」({it['source']})")
+        src = "、".join(f"{s['source_type']}#{s['source_id']}"
+                        for s in it["sources"])
+        print(f"    命中 #{it['hit_id']} 「{it['name']}」新[{it['start']},{it['end']}) "
+              f"「{it['excerpt']}」来源：{src}")
     print(f"    待核 {len(idx['pending'])} 条不进入检索库")
 
     print("\n== 3. 编辑确认待核标注：張三 旧[5,7) → 新[7,9)")
@@ -94,7 +103,45 @@ def main() -> None:
     after = http.get(f"/pages/{page2['id']}").json()
     show_page("冲突退回后（当前结果保留）", after)
 
-    print("\n== 5. 并发冲突：两个客户端同时确认同一条待核标注")
+    print("\n== 5. 补录新添人名并合并为命中")
+    page4 = http.post("/pages", json=SUP_PAGE).json()
+    show_page("建页结果", page4)
+    first = http.post(f"/pages/{page4['id']}/supplements",
+                      json={"name": "王五", "new_start": 0, "new_end": 2})
+    print(f"  补录 王五 [0,2)：HTTP {first.status_code}，补录 "
+          f"#{first.json()['id']} → 命中 #{first.json()['hit_id']}")
+    r2 = http.post(f"/pages/{page4['id']}/supplements",
+                   json={"name": "王五", "new_start": 0, "new_end": 2})
+    print(f"  重复补录同一处：HTTP {r2.status_code}，仍为补录 #{r2.json()['id']}")
+    r = http.post(f"/pages/{page4['id']}/supplements",
+                  json={"name": "王五", "new_start": 10, "new_end": 12})
+    sup = r.json()
+    print(f"  补录 王五 [10,12)：命中 #{sup['hit_id']}")
+    hits = http.get(f"/pages/{page4['id']}/hits").json()["items"]
+    for h in hits:
+        src = "、".join(f"{s['source_type']}#{s['source_id']}"
+                        for s in h["sources"])
+        print(f"    命中 #{h['hit_id']} 「{h['name']}」[{h['start']},{h['end']}) "
+              f"来源：{src}")
+
+    print("\n== 6. 更正补录：两种情形")
+    # 情形一：新位置已有同名命中 → 409，告知编号，原供数保留
+    r = http.patch(f"/supplements/{sup['id']}",
+                   json={"new_start": 0, "new_end": 2})
+    print(f"  更正到已被占用的 [0,2)：HTTP {r.status_code} —— "
+          f"{r.json().get('detail')}")
+    # 情形二：新位置无同名命中且原位只剩这条补录 → 编号随补录移动
+    r = http.patch(f"/supplements/{sup['id']}",
+                   json={"new_start": 11, "new_end": 13})
+    moved = r.json()
+    print(f"  更正到空位 [11,13)：HTTP {r.status_code}，编号仍为 "
+          f"#{moved['hit_id']}")
+    hit = http.get(f"/hits/{moved['hit_id']}").json()
+    print(f"  按编号 #{hit['hit_id']} 回查：「{hit['name']}」"
+          f"[{hit['start']},{hit['end']}) 来源 "
+          f"{[(s['source_type'], s['source_id']) for s in hit['sources']]}")
+
+    print("\n== 7. 并发冲突：两个客户端同时确认同一条待核标注")
     page3 = http.post("/pages", json=DUP_PAGE).json()
     target = [a for a in page3["annotations"] if a["status"] == "pending"][0]
     codes = []
